@@ -129,9 +129,9 @@ def sample_motion_model_odometry(u_t, x_prev, alpha):
     delta_trans = math.hypot(x_prev_bar.x - x_curr_bar.x, x_prev_bar.y - x_curr_bar.y)
     delta_rot_2 = x_curr_bar.theta - x_prev_bar.theta - delta_rot_1
 
-    delta_rot1_hat = delta_rot_1 - sample(alpha[0]*(delta_rot_1)**2 + alpha[1]*(delta_trans)**2)
-    delta_trans_hat = delta_trans - sample(alpha[2]*(delta_trans)**2 + alpha[3]*((delta_rot_1)**2+(delta_rot_2)**2))
-    delta_rot2_hat = delta_rot_2 - sample(alpha[0]*(delta_rot_2)**2 + alpha[1]*(delta_trans)**2)
+    delta_rot1_hat = delta_rot_1 - sample(alpha[0]*(delta_rot_1)**2 + alpha[1]*delta_trans**2)
+    delta_trans_hat = delta_trans - sample(alpha[2]*delta_trans**2 + alpha[3]*((delta_rot_1)**2+(delta_rot_2)**2))
+    delta_rot2_hat = delta_rot_2 - sample(alpha[0]*(delta_rot_2)**2 + alpha[1]*delta_trans**2)
 
     x_new = x_prev.x + delta_trans_hat * math.cos(x_prev.theta + delta_rot1_hat)
     y_new = x_prev.y + delta_trans_hat * math.sin(x_prev.theta + delta_rot1_hat)
@@ -199,7 +199,7 @@ def amcl(map_obj, laser, N=1000, step_translation=0.05, alpha=[0.15, 0.15, 0.1, 
     fig, ax = plt.subplots(figsize=(15, 15))
     plt.subplots_adjust(bottom=0.15)
     button_ax = plt.axes([0.4, 0.02, 0.2, 0.05])
-    kidnap_button = Button(button_ax, 'Kidnapping the Robot')
+    kidnap_button = Button(button_ax, 'Kidnappind the Robot')
     kidnap_triggered = [False]
 
     def kidnap(event):
@@ -214,34 +214,38 @@ def amcl(map_obj, laser, N=1000, step_translation=0.05, alpha=[0.15, 0.15, 0.1, 
     alpha_fast = 0.1
     trajectory_x = []
     trajectory_y = []
-   
+    i = 0
     while True:
         if kidnap_triggered[0]:
+            i = 0
             robot_x, robot_y, robot_theta = random_valid_pose(map_obj)
             robot_pose_prev = Pose(robot_x, robot_y, robot_theta)
             trajectory_x.clear()
             trajectory_y.clear()
             kidnap_triggered[0] = False
             print("Robot kidnapped!")
-            
+
         ax.clear()
         ax.imshow(map_obj.img, cmap='gray', origin='upper')
         # Encontrar área útil (pixels livres)
         free_y, free_x = np.where(map_obj.img > 250)
-        margin = 20  # margem opcional em pixels
+        margin = 10  # margem opcional em pixels
         x_min = max(free_x.min() - margin, 0)
-        x_max = min(free_x.max() + margin, map_obj.width-1)
+        x_max = min(free_x.max() + margin, map_obj.width)
         y_min = max(free_y.min() - margin, 0)
-        y_max = min(free_y.max() + margin, map_obj.height-1)
+        y_max = min(free_y.max() + margin, map_obj.height)
 
-        ax.set_xlim(x_min, x_max)
-        ax.set_ylim(y_max, y_min)  # y invertido para manter origem 'upper'
+        ax.set_xlim([x_min, x_max])
+        ax.set_ylim([y_max, y_min])  # y invertido para manter origem 'upper'
+
+
         px, py = map_obj.pixel_position(particles[:, 0], particles[:, 1])
         ax.scatter(px, py, s=2, c='orange', label='Particles')
         rx, ry = map_obj.pixel_position(np.array([robot_x]), np.array([robot_y]))
         ax.scatter(rx, ry, s=120, facecolors='none', edgecolors='blue', linewidths=1.5, label='Robot Position')
         tx, ty = map_obj.pixel_position(np.array(trajectory_x), np.array(trajectory_y))
         ax.plot(tx, ty, color='cyan', linewidth=1.5, label='Trajectory')
+
 
         if np.random.rand() < 0.1:
             robot_theta += np.random.uniform(-np.pi/4, np.pi/4)
@@ -275,6 +279,19 @@ def amcl(map_obj, laser, N=1000, step_translation=0.05, alpha=[0.15, 0.15, 0.1, 
         robot_pose_prev = robot_pose_curr
         # Etapa 2: Medição e pesos
         real_reading = laser.raycasting(robot_x, robot_y, robot_theta)
+        
+
+        angles = np.radians(np.arange(0, 360, 1))
+        phi = robot_theta + angles
+        ranges = real_reading
+        x_laser = robot_x + ranges * np.cos(phi)
+        y_laser = robot_y + ranges * np.sin(phi)
+        lx, ly = map_obj.pixel_position(x_laser, y_laser)
+        ax.scatter(lx, ly, s=2, c='red', label='Laser')
+
+        ax.legend()
+        ax.set_title("Monte Carlo Localization: Micro-simulator")
+        plt.pause(0.05)
 
         weights = []
         for x, y, theta in particles:
@@ -319,6 +336,15 @@ def amcl(map_obj, laser, N=1000, step_translation=0.05, alpha=[0.15, 0.15, 0.1, 
         #cos_sum = np.average(np.cos(particles[:, 2]), weights=weights)
         #theta_est = np.arctan2(sin_sum, cos_sum)
         
+        '''
+        px, py = map_obj.pixel_position(particles[:, 0], particles[:, 1])
+        ax.scatter(px, py, s=2, c='orange', label='Particles')
+        rx, ry = map_obj.pixel_position(np.array([robot_x]), np.array([robot_y]))
+        ax.scatter(rx, ry, s=120, facecolors='none', edgecolors='blue', linewidths=1.5, label='Robot Position')
+        tx, ty = map_obj.pixel_position(np.array(trajectory_x), np.array(trajectory_y))
+        ax.plot(tx, ty, color='cyan', linewidth=1.5, label='Trajectory')
+        
+
         angles = np.radians(np.arange(0, 360, 1))
         phi = robot_theta + angles
         ranges = real_reading
@@ -330,7 +356,7 @@ def amcl(map_obj, laser, N=1000, step_translation=0.05, alpha=[0.15, 0.15, 0.1, 
         ax.legend()
         ax.set_title("Monte Carlo Localization: Micro-simulator")
         plt.pause(0.05)
-
+        '''
 def MonteCarloLocalization():
     map_obj, laser = initialize_map_and_laser()
     amcl(map_obj, laser)
