@@ -1,0 +1,9 @@
+# Ignore all files starting with 'teste' and ending in '.py'
+testes*.py
+marco_teste.py
+.vscode
+.vscode/*
+
+# Ignore compiled Python files
+__pycache__/
+*.pyc
