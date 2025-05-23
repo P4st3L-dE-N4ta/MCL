@@ -1,4 +1,3 @@
-
 """
 micro_sim.py
 
@@ -22,7 +21,7 @@ import re
 import math
 from scipy.stats import norm
 from matplotlib.widgets import Button
-
+import sys
 class Map:
     def read_pgm_file(self, file_path, byteorder='>'):
         # Abre o ficheiro PGM em modo binário e lê todo o conteúdo.
@@ -120,30 +119,29 @@ class Pose:
 def sample(variance):
     return np.random.normal(0, variance)
 
+def normalize_angle(angle):
+    return (angle + np.pi) % (2 * np.pi) - np.pi
+
 # sample_motion_model_odometry simula o modelo de movimento do robô com base na odometria (ver livro, página 136)
 def sample_motion_model_odometry(u_t, x_prev, alpha):
     x_prev_bar, x_curr_bar = u_t
 
-    delta_rot_1 = math.atan2(x_curr_bar.y - x_prev_bar.y, x_curr_bar.x - x_prev_bar.x) - x_prev_bar.theta
+    delta_rot_1 = (math.atan2(x_curr_bar.y - x_prev_bar.y, x_curr_bar.x - x_prev_bar.x) - x_prev_bar.theta)
+    delta_trans = math.hypot(x_prev_bar.x - x_curr_bar.x , x_prev_bar.y - x_curr_bar.y)
+    delta_rot_2 = (x_curr_bar.theta - x_prev_bar.theta - delta_rot_1)
 
-    delta_trans = math.hypot(x_prev_bar.x - x_curr_bar.x, x_prev_bar.y - x_curr_bar.y)
-    delta_rot_2 = x_curr_bar.theta - x_prev_bar.theta - delta_rot_1
-
-    delta_rot1_hat = delta_rot_1 - sample(alpha[0]*(delta_rot_1)**2 + alpha[1]*(delta_trans)**2)
-    delta_trans_hat = delta_trans - sample(alpha[2]*(delta_trans)**2 + alpha[3]*((delta_rot_1)**2+(delta_rot_2)**2))
-    delta_rot2_hat = delta_rot_2 - sample(alpha[0]*(delta_rot_2)**2 + alpha[1]*(delta_trans)**2)
+    delta_rot1_hat = delta_rot_1 - sample((alpha[0]*delta_rot_1**2 + alpha[1]*delta_trans**2))
+    delta_trans_hat = delta_trans - sample((alpha[2]*delta_trans**2 + alpha[3]*(delta_rot_1**2 + delta_rot_2**2)))
+    delta_rot2_hat = delta_rot_2 - sample((alpha[0]*delta_rot_2**2 + alpha[1]*delta_trans**2))
 
     x_new = x_prev.x + delta_trans_hat * math.cos(x_prev.theta + delta_rot1_hat)
     y_new = x_prev.y + delta_trans_hat * math.sin(x_prev.theta + delta_rot1_hat)
-    theta_new = x_prev.theta + delta_rot1_hat + delta_rot2_hat
-
-    # Normalize angle to [-pi, pi]
-    theta_new = (theta_new + np.pi) % (2 * np.pi) - np.pi
-
-    return (x_new, y_new, theta_new)
+    theta_new = (x_prev.theta + delta_rot1_hat + delta_rot2_hat)
+    theta_new = normalize_angle(theta_new)
+    return Pose(x_new, y_new, theta_new)
 
 # beam_range_finder_model simula o modelo de medição do sensor a laser (ver livro, página 136)
-def beam_range_finder_model(z, z_star, z_max, sigma_hit=0.2, lambda_short=0.1, z_hit=0.8, z_short=0.1, z_max_weight=0.05, z_rand=0.05):
+def beam_range_finder_model(z, z_star, z_max, sigma_hit=20, lambda_short=0.1, z_hit=0.8, z_short=0.1, z_max_weight=0.05, z_rand=0.05):
     z = np.asarray(z)
     z_exp = np.asarray(z_star)
     assert z.shape == z_exp.shape, "z and z_expected must have the same shape"
@@ -181,7 +179,7 @@ def random_valid_pose(map_obj):
         y = np.random.uniform(0, map_obj.height * map_obj.resolution)
         if map_obj.valid_position(x, y):
             theta = np.random.uniform(0, 2*np.pi)
-            return x, y, theta
+            return Pose(x, y, theta)
 
 def initialize_particles(map_obj, N):
     particles = []
@@ -190,150 +188,166 @@ def initialize_particles(map_obj, N):
         particles.append([x, y, theta])
     return np.array(particles)
 
+def initialize_particles_from_pose(map_obj, N, pose):
+    # Cria partículas em torno de uma pose inicial
+    particles = []
+    while len(particles) < N:
+        x = pose.x + np.random.normal(0, 0.1)
+        #print(len(particles))
+        y = pose.y + np.random.normal(0, 0.1)
+        theta = pose.theta + np.random.normal(0, np.radians(2))
+        #print(map_obj.valid_position(x, y))
+        if map_obj.valid_position(x, y):
+            particles.append([x, y, theta])
+    return np.array(particles)
 
-def amcl(map_obj, laser, N=1000, step_translation=0.05, alpha=[0.15, 0.15, 0.1, 0.1]):
-    robot_x, robot_y, robot_theta = random_valid_pose(map_obj)
-    robot_pose_prev = Pose(robot_x, robot_y, robot_theta)
-    particles = initialize_particles(map_obj, N)
-
+def amcl_case_1(map_obj, laser, N=1000, step_translation=0.05, alpha=[0.1, 0.15, 0.15, 0.1]):
+    robot_pose = Pose(0, 0, 0)
+    #robot_pose = random_valid_pose(map_obj)
+    robot_pose_prev = Pose(robot_pose.x, robot_pose.y, robot_pose.theta)
+    particles = initialize_particles_from_pose(map_obj, N, robot_pose)
     fig, ax = plt.subplots(figsize=(15, 15))
     plt.subplots_adjust(bottom=0.15)
-    button_ax = plt.axes([0.4, 0.02, 0.2, 0.05])
-    kidnap_button = Button(button_ax, 'Kidnapping the Robot')
-    kidnap_triggered = [False]
-
-    def kidnap(event):
-        kidnap_triggered[0] = True
-        #print("Kidnap button clicked!")
-
-    kidnap_button.on_clicked(kidnap)
-
-    wslow = 0.0
-    wfast = 0.0
+    w_slow = 0.0
+    w_fast = 0.0
+    w_avg = 0.0
     alpha_slow = 0.001
     alpha_fast = 0.1
     trajectory_x = []
     trajectory_y = []
-   
     while True:
-        if kidnap_triggered[0]:
-            robot_x, robot_y, robot_theta = random_valid_pose(map_obj)
-            robot_pose_prev = Pose(robot_x, robot_y, robot_theta)
-            trajectory_x.clear()
-            trajectory_y.clear()
-            kidnap_triggered[0] = False
-            print("Robot kidnapped!")
-            
         ax.clear()
-        ax.imshow(map_obj.img, cmap='gray', origin='upper')
-        # Encontrar área útil (pixels livres)
+        ax.imshow(map_obj.img, origin='upper', cmap='gray')
         free_y, free_x = np.where(map_obj.img > 250)
-        margin = 20  # margem opcional em pixels
+        margin = 20
         x_min = max(free_x.min() - margin, 0)
         x_max = min(free_x.max() + margin, map_obj.width-1)
         y_min = max(free_y.min() - margin, 0)
         y_max = min(free_y.max() + margin, map_obj.height-1)
-
         ax.set_xlim(x_min, x_max)
-        ax.set_ylim(y_max, y_min)  # y invertido para manter origem 'upper'
+        ax.set_ylim(y_min, y_max)
+
         px, py = map_obj.pixel_position(particles[:, 0], particles[:, 1])
         ax.scatter(px, py, s=2, c='orange', label='Particles')
-        rx, ry = map_obj.pixel_position(np.array([robot_x]), np.array([robot_y]))
-        ax.scatter(rx, ry, s=120, facecolors='none', edgecolors='blue', linewidths=1.5, label='Robot Position')
+        rx, ry = map_obj.pixel_position(np.array([robot_pose.x]), np.array([robot_pose.y]))
+        ax.scatter(rx, ry, s=120, facecolors='none', edgecolors='blue', linewidths=1.5 ,label='Robot Position')
         tx, ty = map_obj.pixel_position(np.array(trajectory_x), np.array(trajectory_y))
-        ax.plot(tx, ty, color='cyan', linewidth=1.5, label='Trajectory')
+        ax.plot(tx, ty, color= 'cyan', linewidth=1.5, label='Trajectory')
 
         if np.random.rand() < 0.1:
-            robot_theta += np.random.uniform(-np.pi/4, np.pi/4)
-        else:
-            robot_theta += np.radians(10) * (1 if np.random.rand() < 0.5 else -1)
-        robot_theta %= 2*np.pi
+            robot_pose.theta += np.random.uniform(-np.pi/4, np.pi/4)
+            robot_pose.theta = normalize_angle(robot_pose.theta)
 
-        new_x = robot_x + step_translation * np.cos(robot_theta)
-        new_y = robot_y + step_translation * np.sin(robot_theta)
+        new_x = robot_pose.x + step_translation * np.cos(robot_pose.theta)
+        new_y = robot_pose.y + step_translation * np.sin(robot_pose.theta)
 
         if map_obj.valid_position(new_x, new_y):
-            robot_pose_curr = Pose(new_x, new_y, robot_theta)
-            robot_x, robot_y = new_x, new_y
+            robot_pose_prev = Pose(robot_pose.x, robot_pose.y, robot_pose.theta)
+            robot_pose = Pose(new_x, new_y, robot_pose.theta)
         else:
-            robot_theta += np.pi / 2
-            robot_pose_curr = Pose(robot_x, robot_y, robot_theta)
+            robot_pose_prev = Pose(robot_pose.x, robot_pose.y, robot_pose.theta)
 
-        trajectory_x.append(robot_x)
-        trajectory_y.append(robot_y)
-        # Etapa 1: Amostragem do modelo de movimento
-        u_t = (robot_pose_prev, robot_pose_curr)
+            robot_pose.theta += np.pi
+            robot_pose.theta = normalize_angle(robot_pose.theta)
+            robot_pose = Pose(robot_pose.x, robot_pose.y, robot_pose.theta)
+            
+        trajectory_x.append(robot_pose.x)
+        trajectory_y.append(robot_pose.y)
+        
+        # Amostragem modelo de movimento
+        u_t = (robot_pose_prev, robot_pose)
         new_particles = []
-        for x, y, theta in particles:
-            p = Pose(x, y, theta)
-            x2, y2, t2 = sample_motion_model_odometry(u_t, p, alpha)
-            if map_obj.valid_position(x2, y2):
-                new_particles.append([x2, y2, t2])
+        weights = []        
+        # Simulação do sensor a laser
+        real_reading = laser.raycasting(robot_pose.x, robot_pose.y, robot_pose.theta)
+        #print(real_reading)
+        for i in range(N):
+            x, y, theta = particles[i]
+            new_particle = sample_motion_model_odometry(u_t, Pose(x, y, theta), alpha)
+
+            if map_obj.valid_position(new_particle.x, new_particle.y):
+                new_particles.append([new_particle.x, new_particle.y, new_particle.theta])
             else:
                 new_particles.append([x, y, theta])
-        particles = np.array(new_particles)
-        robot_pose_prev = robot_pose_curr
-        # Etapa 2: Medição e pesos
-        real_reading = laser.raycasting(robot_x, robot_y, robot_theta)
 
-        weights = []
-        for x, y, theta in particles:
-            reading = laser.raycasting(x, y, theta)
-            weight = beam_range_finder_model(real_reading, reading, laser.laser_max_range)
+            expected_reading = laser.raycasting(new_particle.x, new_particle.y, new_particle.theta)
+            weight = beam_range_finder_model(real_reading, expected_reading, laser.laser_max_range)
+            
             weights.append(weight)
-        weights = np.array(weights)
-        weights += 1e-300
-        weights /= np.sum(weights)
+            #sum_weights = np.sum(weights)
+            w_avg += weight/N
+            #print(np.sum(weights))
+        particles = np.array(new_particles)
+        #robot_pose_prev = Pose(robot_pose.x, robot_pose.y, robot_pose.theta)
 
-        wavg = np.mean(weights)
-        if wslow == 0.0: wslow = wavg
-        if wfast == 0.0: wfast = wavg
-        wslow += alpha_slow * (wavg - wslow)
-        wfast += alpha_fast * (wavg - wfast)
-        
-        # Etapa 4: Reamostragem adaptativa (Augmented MCL)
-        prob_random = max(0.0, 1.0 - wfast / wslow)
+
+        # Atualização do peso dos partículas
+        weights_norm = weights / np.sum(weights)
+        weights = weights_norm
+        w_slow += alpha_slow * (w_avg - w_slow) 
+        w_fast += alpha_fast * (w_avg - w_fast)
+
+        # Resampling
+        prob_rand = max(0.0, 1.0 - w_fast / w_slow)
         new_particles = []
-        for _ in range(N):
-            if np.random.rand() < prob_random:
+        for i in range (N):
+            if np.random.rand() < prob_rand:
                 while True:
-                    x_rand = np.random.uniform(0, map_obj.width * map_obj.resolution)
-                    y_rand = np.random.uniform(0, map_obj.height * map_obj.resolution)
-                    if map_obj.valid_position(x_rand, y_rand):
-                        theta_rand = np.random.uniform(0, 2 * np.pi)
-                        new_particles.append([x_rand, y_rand, theta_rand])
+                    x = np.random.uniform(0, map_obj.width * map_obj.resolution)
+                    y = np.random.uniform(0, map_obj.height * map_obj.resolution)
+                    if map_obj.valid_position(x, y):
                         break
+                new_particles.append([x, y, theta])
+
             else:
-                idx = np.random.choice(len(particles), p=weights)
+                #print(np.sum(weights))
+                idx = np.random.choice(N, p=weights)
                 new_particles.append(particles[idx])
         particles = np.array(new_particles)
 
-        # Etapa 5: Adição de ruído
-        particles[:, 0] += np.random.normal(0, 0.01, size=N)
-        particles[:, 1] += np.random.normal(0, 0.01, size=N)
-        particles[:, 2] += np.random.normal(0, np.radians(2), size=N)
+        # Adição de ruído
+        particles[:, 0] += np.random.normal(0, 0.01, size= N)
+        particles[:, 1] += np.random.normal(0, 0.01, size = N)
+        particles[:, 2] += np.random.normal(0, np.radians(2), size = N)       
+        particles[:, 2] = normalize_angle(particles[:, 2])
 
-        #x_est = np.average(particles[:, 0], weights=weights)
-        #y_est = np.average(particles[:, 1], weights=weights)
-        #sin_sum = np.average(np.sin(particles[:, 2]), weights=weights)
-        #cos_sum = np.average(np.cos(particles[:, 2]), weights=weights)
-        #theta_est = np.arctan2(sin_sum, cos_sum)
-        
         angles = np.radians(np.arange(0, 360, 1))
-        phi = robot_theta + angles
+        phi = robot_pose.theta + angles
         ranges = real_reading
-        x_laser = robot_x + ranges * np.cos(phi)
-        y_laser = robot_y + ranges * np.sin(phi)
+        x_laser = robot_pose.x + ranges * np.cos(phi)
+        y_laser = robot_pose.y + ranges * np.sin(phi)
         lx, ly = map_obj.pixel_position(x_laser, y_laser)
-        ax.scatter(lx, ly, s=2, c='red', label='Laser')
-
+        ax.scatter(lx, ly, s=2, c='lime', label='Laser Readings')
         ax.legend()
-        ax.set_title("Monte Carlo Localization: Micro-simulator")
-        plt.pause(0.05)
+        ax.set_title("Monte Carlo Localization: Micro-Simulator")
+        plt.pause(0.01)
+
+def amcl_case_2(map_obj, laser, N=1000, step_translation=0.05, alpha=[0.15, 0.15, 0.1, 0.1]):
+   pass
+
+
+
+def amcl_case_3(map_obj, laser, N=1000, step_translation=0.05, alpha=[0.15, 0.15, 0.1, 0.1]):
+   pass
 
 def MonteCarloLocalization():
     map_obj, laser = initialize_map_and_laser()
-    amcl(map_obj, laser)
+    if len(sys.argv) < 2:
+        print("Usage: python micro_sim.py <case_number>")
+        sys.exit(1)
+    try:
+        in_file = int(sys.argv[1])
+    except ValueError:
+        print("Invalid input: case_number must be an integer")
+        sys.exit(1)
+    if in_file == 1:
+        amcl_case_1(map_obj, laser)
+    elif in_file == 2:
+        amcl_case_2(map_obj, laser)
+    elif in_file == 3:
+        amcl_case_3(map_obj, laser)
+    else:
+        print("Invalid input")
 
 if __name__ == "__main__":
     MonteCarloLocalization()
