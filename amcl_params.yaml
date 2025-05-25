@@ -1,0 +1,13 @@
+{base_frame_id: base_footprint, beam_skip_distance: 0.5, beam_skip_threshold: 0.3,
+  do_beamskip: false, first_map_only: false, force_update_after_initialpose: false,
+  force_update_after_set_map: false, global_frame_id: map, gui_publish_rate: 50.0,
+  initial_cov_aa: 0.0012204266537201652, initial_cov_xx: 0.0016050454814866555, initial_cov_yy: 0.006203608611447472,
+  initial_pose_a: 0.747331389982878, initial_pose_x: 4.833905894992435, initial_pose_y: 0.13501373373648473,
+  kld_err: 0.02, kld_z: 0.99, laser_lambda_short: 0.1, laser_likelihood_max_dist: 2.0,
+  laser_max_beams: 180, laser_max_range: 3.5, laser_min_range: -1.0, laser_model_type: likelihood_field,
+  laser_sigma_hit: 0.2, laser_z_hit: 0.5, laser_z_max: 0.05, laser_z_rand: 0.5, laser_z_short: 0.05,
+  max_particles: 3000, min_particles: 500, odom_alpha1: 0.1, odom_alpha2: 0.1, odom_alpha3: 0.1,
+  odom_alpha4: 0.1, odom_alpha5: 0.2, odom_frame_id: odom, odom_model_type: diff,
+  recovery_alpha_fast: 0.0, recovery_alpha_slow: 0.0, resample_interval: 1, restore_defaults: false,
+  save_pose_rate: 0.5, tf_broadcast: true, transform_tolerance: 0.5, update_min_a: 0.2,
+  update_min_d: 0.2, use_map_topic: false}
