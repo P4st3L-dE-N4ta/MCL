@@ -28,7 +28,7 @@ class Map:
         # Abre o ficheiro PGM em modo binário e lê todo o conteúdo.
         with open(file_path, 'rb') as file:
             buffer = file.read()
-        try:
+        try:    
         # Abre o arquivo PGM em modo binário e lê todo o conteúdo.
             header, self.width, self.height, max_val = re.search(
                 b"(^P5\s(?:\s*#.*[\r\n])*"
@@ -146,7 +146,7 @@ def sample_motion_model_odometry(u_t, x_prev, alpha):
     return Pose(x_new, y_new, theta_new)
 
 # beam_range_finder_model simula o modelo de medição do sensor a laser (ver livro, página 136)
-def beam_range_finder_model(z, z_star, z_max, sigma_hit=7.5, z_hit=0.95, z_rand=0.05):
+def beam_range_finder_model(z, z_star, z_max, sigma_hit=10, z_hit=0.95, z_rand=0.05):
     z = np.asarray(z)
     z_exp = np.asarray(z_star)
     assert z.shape == z_exp.shape, "z and z_expected must have the same shape"
@@ -163,7 +163,7 @@ def beam_range_finder_model(z, z_star, z_max, sigma_hit=7.5, z_hit=0.95, z_rand=
 
     p_mix = (z_hit* p_hit + z_rand* p_rand)
     q = np.prod(p_mix)
-    print(f"q: {q:.3f}")
+    #print(f"q: {q:.3f}")
     return q
 
 def initialize_map_and_laser(map_file="lab.pgm", yaml_file="lab.yaml"):
@@ -329,8 +329,8 @@ def amcl_case_1(map_obj, laser, N=1000, step_translation=0.05, alpha= [0.005, 0.
         ranges = real_reading
         x_laser = robot_pose.x + ranges * np.cos(phi)
         y_laser = robot_pose.y + ranges * np.sin(phi)
-        lx, ly = map_obj.pixel_position(x_laser, y_laser)
-        ax.scatter(lx, ly, s=2, c='red', label='Laser Readings')
+        #lx, ly = map_obj.pixel_position(x_laser, y_laser)
+        #ax.scatter(lx, ly, s=2, c='red', label='Laser Readings')
         ax.legend()
         ax.set_title("Monte Carlo Localization: Micro-Simulator")
         plt.pause(0.01)
@@ -412,8 +412,8 @@ def amcl_case_2(map_obj, laser, N=2000, step_translation=0.05, alpha=[0.05, 0.07
             weights = np.ones_like(weights) / len(weights)
         else:
             weights /= sum_weights
-        aux_sum = np.sum(weights)
-        print(f"Normalized weights sum: {aux_sum:.3f}")    
+        #aux_sum = np.sum(weights)
+        #print(f"Normalized weights sum: {aux_sum:.3f}")    
         n_eff = 1.0 / np.sum(weights ** 2)
 
         w_slow += alpha_slow * (w_avg - w_slow)
@@ -452,8 +452,8 @@ def amcl_case_2(map_obj, laser, N=2000, step_translation=0.05, alpha=[0.05, 0.07
         ranges = real_reading
         x_laser = robot_pose.x + ranges * np.cos(phi)
         y_laser = robot_pose.y + ranges * np.sin(phi)
-        lx, ly = map_obj.pixel_position(x_laser, y_laser)
-        ax.scatter(lx, ly, s=2, c='red', label='Laser Readings')
+        #lx, ly = map_obj.pixel_position(x_laser, y_laser)
+        #ax.scatter(lx, ly, s=2, c='red', label='Laser Readings')
         ax.legend()
         ax.set_title("Monte Carlo Localization: Micro-Simulator")
         plt.pause(0.01)
@@ -626,8 +626,8 @@ def amcl_case_3(map_obj, laser, N=2000, step_translation=0.05, alpha=[0.05, 0.07
         ranges = real_reading
         x_laser = robot_pose.x + ranges * np.cos(phi)
         y_laser = robot_pose.y + ranges * np.sin(phi)
-        lx, ly = map_obj.pixel_position(x_laser, y_laser)
-        ax.scatter(lx, ly, s=2, c='red', label='Laser Readings')
+        #lx, ly = map_obj.pixel_position(x_laser, y_laser)
+        #ax.scatter(lx, ly, s=2, c='red', label='Laser Readings')
         ax.legend()
         ax.set_title("Monte Carlo Localization: Micro-Simulator")
         plt.pause(0.01)
